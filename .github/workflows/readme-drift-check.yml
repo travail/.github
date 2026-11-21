@@ -1,8 +1,9 @@
 name: README Drift Check
 
 # Reusable workflow. Asks Gemini whether a PR's diff makes README.md out of
-# date, and upserts (or removes) an advisory warning comment on the PR. The
-# check never fails the build.
+# date, and upserts (or removes) a warning comment on the PR. By default it is
+# advisory only; set fail-on-drift: true to fail the job when drift is
+# detected unless the readme-drift-ack label is present.
 #
 # The caller owns the trigger and the token permissions, and passes its own
 # GEMINI_API_KEY (each repository keeps its own free-tier quota). Minimal
@@ -36,6 +37,12 @@ on:
           @v1); override it only to test a branch.
         type: string
         default: v1
+      fail-on-drift:
+        description: >-
+          Whether to fail the job when README drift is detected (unless the
+          readme-drift-ack label is present on the PR).
+        type: boolean
+        default: false
     secrets:
       GEMINI_API_KEY:
         required: true
@@ -51,13 +58,56 @@ jobs:
       contents: read
       pull-requests: write
     steps:
+      - name: check readme-drift-ack label and event action
+        id: gate
+        env:
+          HAS_ACK_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'readme-drift-ack') }}
+          EVENT_ACTION: ${{ github.event.action }}
+          EVENT_LABEL: ${{ github.event.label.name }}
+        run: |
+          if [ "${HAS_ACK_LABEL}" = "true" ]; then
+            echo "mode=ack" >> "$GITHUB_OUTPUT"
+            echo "readme-drift-ack label is present; skipping README drift check."
+          elif [ "${EVENT_ACTION}" = "labeled" ] || [ "${EVENT_ACTION}" = "unlabeled" ]; then
+            if [ "${EVENT_LABEL}" != "readme-drift-ack" ]; then
+              echo "mode=unrelated_label" >> "$GITHUB_OUTPUT"
+              echo "Unrelated label event (${EVENT_ACTION}: ${EVENT_LABEL}); skipping Gemini check."
+            else
+              echo "mode=run" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "mode=run" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: preserve drift failure state on unrelated label events
+        if: steps.gate.outputs.mode == 'unrelated_label' && inputs.fail-on-drift
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const marker = '<!-- readme-drift-check -->';
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(
+              (comment) => comment.user.type === 'Bot' && comment.body.includes(marker),
+            );
+            if (existing) {
+              core.setFailed(
+                'README drift was previously detected. Update README.md or add the readme-drift-ack label if this is a false positive.',
+              );
+            }
+
       # The caller's PR.
       - uses: actions/checkout@v7
+        if: steps.gate.outputs.mode == 'run'
         with:
           fetch-depth: 0
 
       # check_readme_drift.py, which lives in this repository.
       - uses: actions/checkout@v7
+        if: steps.gate.outputs.mode == 'run'
         with:
           repository: travail/.github
           ref: ${{ inputs.tools-ref }}
@@ -67,14 +117,17 @@ jobs:
           persist-credentials: false
 
       - uses: actions/setup-python@v7
+        if: steps.gate.outputs.mode == 'run'
         with:
           python-version: "3.13"
 
       - name: install google-genai
+        if: steps.gate.outputs.mode == 'run'
         run: pip install google-genai
 
       - name: ask Gemini whether README.md needs updating
         id: check
+        if: steps.gate.outputs.mode == 'run'
         # Safety net for a hang the script's own fallback logic can't catch:
         # that logic only reacts to a 429/503 the API actually returns, but
         # a request that just never responds raises no exception for it to
@@ -87,14 +140,17 @@ jobs:
         run: python .readme-drift-tools/.github/scripts/check_readme_drift.py
 
       - name: upsert or remove the README drift comment
+        if: steps.gate.outputs.mode == 'run'
         uses: actions/github-script@v9
         env:
           NEEDS_UPDATE: ${{ steps.check.outputs.needs_update }}
           REASON: ${{ steps.check.outputs.reason }}
+          FAIL_ON_DRIFT: ${{ inputs.fail-on-drift }}
         with:
           script: |
             const marker = '<!-- readme-drift-check -->';
             const needsUpdate = process.env.NEEDS_UPDATE === 'true';
+            const failOnDrift = process.env.FAIL_ON_DRIFT === 'true';
 
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner: context.repo.owner,
@@ -117,9 +173,17 @@ jobs:
               return;
             }
 
-            // The check never fails the build, so this comment is the only signal
-            // that the README drifted. Render it as an alert so it is not mistaken
-            // for routine bot chatter next to a green check list.
+            const footerLines = failOnDrift
+              ? [
+                  '> Judged automatically by Gemini. If this is a false positive,',
+                  '> add the `readme-drift-ack` label to acknowledge and pass this check.',
+                ]
+              : [
+                  '> Every other check can stay green while this one is true, so please',
+                  '> look before merging. Judged automatically by Gemini, and advisory',
+                  '> only: it never blocks a merge.',
+                ];
+
             const reason = process.env.REASON;
             const body = [
               marker,
@@ -128,9 +192,7 @@ jobs:
               '>',
               ...reason.split('\n').map((line) => `> ${line}`),
               '>',
-              '> Every other check can stay green while this one is true, so please',
-              '> look before merging. Judged automatically by Gemini, and advisory',
-              '> only: it never blocks a merge.',
+              ...footerLines,
             ].join('\n');
 
             if (existing) {
@@ -147,4 +209,10 @@ jobs:
                 issue_number: context.issue.number,
                 body,
               });
+            }
+
+            if (failOnDrift) {
+              core.setFailed(
+                'README drift detected. Update README.md or add the readme-drift-ack label if this is a false positive.',
+              );
             }

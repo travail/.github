@@ -28,12 +28,13 @@ A reusable workflow cannot choose its own trigger (`on:`). Its token permissions
 
 #### `readme-drift-check.yml`
 
-Asks Gemini whether a pull request's diff makes `README.md` out of date, and upserts (or removes) an advisory warning comment on the PR. It never fails the build. Dependabot PRs are skipped.
+Asks Gemini whether a pull request's diff makes `README.md` out of date, and upserts (or removes) a warning comment on the PR. By default it is advisory only; set `fail-on-drift: true` to fail the job when drift is detected unless the `readme-drift-ack` label is present on the PR. Dependabot PRs are skipped.
 
 | Input / secret | Required | Default | Description |
 | --- | --- | --- | --- |
 | `timeout-minutes` | no | `1` | Timeout of the step that calls Gemini, in minutes. |
 | `tools-ref` | no | `v1` | Ref of this repository to fetch `check_readme_drift.py` from. Leave the default when calling `@v1`; override it only when pinning a fixed ref or testing a branch. |
+| `fail-on-drift` | no | `false` | Fail the job when README drift is detected (unless the `readme-drift-ack` label is present). |
 | `GEMINI_API_KEY` (secret) | yes | | Passed explicitly by the caller, so each repository keeps its own free-tier quota. |
 
 ```yaml
@@ -55,6 +56,8 @@ jobs:
     secrets:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 ```
+
+To fail the check on drift and allow acknowledging false positives via the `readme-drift-ack` label, add `labeled` and `unlabeled` to `pull_request.types` and pass `fail-on-drift: true`. The `readme-drift-ack` label must exist in the calling repository.
 
 #### `sync-pr-labels.yml`
 
