@@ -1,0 +1,78 @@
+name: Release
+
+# Manually triggered release workflow. Validates a vX.Y.Z tag on main,
+# creates the immutable release tag and GitHub Release, and then moves the
+# corresponding major tag (e.g. v1) to the same commit.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version tag to release (vX.Y.Z, e.g. v1.0.0)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+# Prevent concurrent releases from racing on the major tag update.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate ref and version input
+        id: validate
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "Error: release workflow must be run on refs/heads/main (got: $GITHUB_REF)." >&2
+            exit 1
+          fi
+
+          if [[ ! "$VERSION" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Error: version must match vX.Y.Z (got: $VERSION)." >&2
+            exit 1
+          fi
+
+          echo "major_tag=${VERSION%%.*}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Check that tag does not already exist
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [[ -n "$(git ls-remote --tags origin "refs/tags/${VERSION}")" ]]; then
+            echo "Error: tag ${VERSION} already exists." >&2
+            exit 1
+          fi
+
+      - name: Create and push version tag
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$VERSION" -m "Release $VERSION"
+          git push origin "refs/tags/${VERSION}"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: gh release create "$VERSION" --verify-tag --generate-notes
+
+      - name: Create or move major tag
+        env:
+          VERSION: ${{ inputs.version }}
+          MAJOR_TAG: ${{ steps.validate.outputs.major_tag }}
+        run: |
+          git tag -f -a "$MAJOR_TAG" -m "Release $VERSION ($MAJOR_TAG)"
+          git push --force origin "refs/tags/${MAJOR_TAG}"

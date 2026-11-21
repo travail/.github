@@ -33,7 +33,7 @@ Asks Gemini whether a pull request's diff makes `README.md` out of date, and ups
 | Input / secret | Required | Default | Description |
 | --- | --- | --- | --- |
 | `timeout-minutes` | no | `1` | Timeout of the step that calls Gemini, in minutes. |
-| `tools-ref` | no | `v1` | Ref of this repository to fetch `check_readme_drift.py` from. Leave the default when calling `@v1`; override it only to test a branch. |
+| `tools-ref` | no | `v1` | Ref of this repository to fetch `check_readme_drift.py` from. Leave the default when calling `@v1`; override it only when pinning a fixed ref or testing a branch. |
 | `GEMINI_API_KEY` (secret) | yes | | Passed explicitly by the caller, so each repository keeps its own free-tier quota. |
 
 ```yaml
@@ -77,3 +77,27 @@ jobs:
 ```
 
 The label names must exist in the calling repository. Labels are not inherited from this repository.
+
+### Releasing (`.github/workflows/release.yml`)
+
+A manually triggered workflow (`workflow_dispatch`) for tagging releases on `main` and updating the corresponding major tag using only `git` and `gh` with `contents: write` permission.
+
+#### Usage
+
+Run the workflow from the **Actions** tab or via `gh`:
+
+```sh
+gh workflow run release.yml -R travail/.github -f version=v1.0.0
+```
+
+| Input | Required | Description |
+| --- | --- | --- |
+| `version` | yes | Release tag in `vX.Y.Z` format (e.g. `v1.0.0`). Must not already exist on `origin`. |
+
+The workflow verifies that it is running on `refs/heads/main`, validates the `vX.Y.Z` format, creates and pushes the annotated tag `vX.Y.Z`, creates a GitHub Release with auto-generated release notes, and then creates or force-updates the major tag (e.g. `v1`) on the same commit.
+
+#### Versioning and Tag Policy
+
+- **Compatible fixes and additions**: Release a fixed tag such as `v1.0.1` or `v1.1.0`. The workflow moves `v1` to the new commit, so callers referencing `@v1` receive updates automatically without a PR.
+- **Breaking changes** (removing or renaming inputs, adding required secrets, or incompatible behavior changes): Release `v2.0.0` and create a new `v2` tag without moving `v1`.
+- **Caller references**: Reference `@v1` by default; pinning to a SHA or fixed tag is not required. If a caller pins `readme-drift-check.yml` to a fixed tag or SHA, pass the same ref to `tools-ref`.
