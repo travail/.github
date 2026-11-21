@@ -24,7 +24,7 @@ Individual repositories can override these defaults at any time by defining thei
 
 Workflows shared by the repositories under the `travail` account. Call them with `uses: travail/.github/.github/workflows/<name>.yml@v1`. Pin to the `v1` tag; do not use `@main`, because a broken change would reach every repository at once.
 
-A reusable workflow cannot set its own trigger (`on:`) or token permissions. The caller writes both, and the called workflow cannot exceed the permissions the caller grants.
+A reusable workflow cannot choose its own trigger (`on:`). Its token permissions are capped by what the caller grants: the caller writes the `permissions:` block, and the called workflow can only narrow it.
 
 #### `readme-drift-check.yml`
 

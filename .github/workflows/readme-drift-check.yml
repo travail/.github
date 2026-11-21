@@ -62,6 +62,9 @@ jobs:
           repository: travail/.github
           ref: ${{ inputs.tools-ref }}
           path: .readme-drift-tools
+          # Only the script is read from this checkout, so do not leave the
+          # token in its .git/config.
+          persist-credentials: false
 
       - uses: actions/setup-python@v7
         with:
