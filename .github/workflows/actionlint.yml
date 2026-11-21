@@ -1,0 +1,40 @@
+name: actionlint
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/**
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/**
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install and run actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+        run: |
+          mkdir -p /tmp/actionlint
+          base_url="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          checksums="actionlint_${ACTIONLINT_VERSION}_checksums.txt"
+
+          curl -fsSL -o "/tmp/actionlint/${archive}" "${base_url}/${archive}"
+          curl -fsSL -o "/tmp/actionlint/${checksums}" "${base_url}/${checksums}"
+
+          (
+            cd /tmp/actionlint
+            sha256sum --ignore-missing -c "${checksums}"
+            tar -xzf "${archive}" actionlint
+          )
+
+          /tmp/actionlint/actionlint
