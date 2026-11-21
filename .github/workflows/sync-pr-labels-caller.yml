@@ -1,0 +1,15 @@
+name: Sync PR labels (self)
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize]
+
+permissions:
+  issues: read
+  pull-requests: write
+
+jobs:
+  sync-labels:
+    # This repository uses its own reusable workflow from the same checkout, so
+    # a change is exercised by the pull request that makes it.
+    uses: ./.github/workflows/sync-pr-labels.yml
