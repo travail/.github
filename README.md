@@ -78,6 +78,25 @@ jobs:
 
 The label names must exist in the calling repository. Labels are not inherited from this repository.
 
+#### `check-pr-title.yml`
+
+Checks that the pull request title follows Conventional Commits (`<type>[optional (<scope>)][!]: <description>`). Allowed types are `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, and `revert`. Dependabot PRs are skipped. Include `edited` in the trigger types so title updates re-run the check. It needs no inputs or secrets.
+
+```yaml
+name: Check PR title
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  check-pr-title:
+    uses: travail/.github/.github/workflows/check-pr-title.yml@v1
+```
+
 ### Releasing (`.github/workflows/release.yml`)
 
 A manually triggered workflow (`workflow_dispatch`) for tagging releases on `main` and updating the corresponding major tag using only `git` and `gh` with `contents: write` permission.

@@ -1,0 +1,42 @@
+name: Check PR title
+
+# Reusable workflow. Validates that the PR title follows Conventional Commits
+# (`<type>[optional (<scope>)][!]: <description>`). Dependabot PRs are skipped.
+#
+# The caller owns the trigger and the token permissions. Minimal caller:
+#
+#   on:
+#     pull_request:
+#       types: [opened, edited, synchronize, reopened]
+#   permissions:
+#     contents: read
+#   jobs:
+#     check-pr-title:
+#       uses: travail/.github/.github/workflows/check-pr-title.yml@v1
+
+on:
+  workflow_call:
+
+jobs:
+  check-pr-title:
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Validate PR title against Conventional Commits
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const title = context.payload.pull_request.title || '';
+            const pattern = /^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^()\r\n]+\))?!?: \S/;
+
+            if (!pattern.test(title)) {
+              core.setFailed(
+                `PR title "${title}" must follow Conventional Commits (e.g. "feat: add foo" or "fix(scope): resolve bar"). ` +
+                'Allowed types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert.'
+              );
+              return;
+            }
+
+            core.info(`PR title is valid: ${title}`);
