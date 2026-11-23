@@ -8,6 +8,7 @@ are read from the current working directory.
 import os
 import subprocess
 import sys
+import time
 
 from google import genai
 from google.genai import errors, types
@@ -24,6 +25,11 @@ MODEL_CHAIN = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash-li
 # trying the next model in the chain can actually help; any other failure
 # would just as likely recur, so it isn't worth the extra request.
 FALLBACK_CODES = {429, 503}
+
+# Backoff wait in seconds when encountering a 503 (Service Unavailable) before
+# retrying the same model. Kept short so that multiple retries across models
+# remain comfortably within the workflow step's timeout.
+BACKOFF_SECONDS = 5
 
 # All three models in MODEL_CHAIN report context windows around 1,048,576
 # tokens per third-party aggregators (no official Google figure found at the
@@ -110,36 +116,53 @@ def get_diff(base_ref: str) -> str:
 
 def call_gemini(client: genai.Client, prompt: str) -> str | None:
     """Try MODEL_CHAIN in order, falling back to the next model on a 429 or
-    503. Returns the response text, or None if the model failed with something
-    other than a 429/503 (not worth trying again with a different model).
-    Exits the process if every model in the chain hit a 429/503.
+    503. On a 503, backs off briefly before retrying the same model once.
+    Returns the response text, or None if the model failed with something
+    other than a 429/503 (not worth trying again with a different model)
+    or if every model in the chain hit a 429/503 (advisory check fails open).
     """
     for i, model in enumerate(MODEL_CHAIN):
         is_last = i == len(MODEL_CHAIN) - 1
-        try:
-            response = client.models.generate_content(model=model, contents=prompt)
-            return response.text or ""
-        except errors.APIError as exc:
-            if exc.code not in FALLBACK_CODES:
-                print(f"Gemini API call failed ({model}): {exc}", file=sys.stderr)
-                return None
-            label = "quota exceeded" if exc.code == 429 else "unavailable"
-            if is_last:
+        for attempt in range(2):
+            try:
+                response = client.models.generate_content(model=model, contents=prompt)
+                return response.text or ""
+            except errors.APIError as exc:
+                if exc.code not in FALLBACK_CODES:
+                    print(f"Gemini API call failed ({model}): {exc}", file=sys.stderr)
+                    return None
+                if exc.code == 429:
+                    # Daily quota exhausted on this model; retry won't help, fall back immediately.
+                    print(
+                        f"Gemini API quota exceeded (429) on {model}"
+                        + (f", falling back to {MODEL_CHAIN[i + 1]}." if not is_last else "."),
+                        file=sys.stderr,
+                    )
+                    break
+                # exc.code == 503: server overloaded / unavailable
+                if attempt == 0:
+                    print(
+                        f"Gemini API unavailable (503) on {model}, backing off {BACKOFF_SECONDS}s before retrying.",
+                        file=sys.stderr,
+                    )
+                    time.sleep(BACKOFF_SECONDS)
+                    continue
+                # Second attempt also 503
                 print(
-                    f"Gemini API {label} ({exc.code}) on {model}, "
-                    "and no more models to fall back to.",
+                    f"Gemini API unavailable (503) on {model} after retry"
+                    + (f", falling back to {MODEL_CHAIN[i + 1]}." if not is_last else "."),
                     file=sys.stderr,
                 )
-                sys.exit(1)
-            print(
-                f"Gemini API {label} ({exc.code}) on {model}, "
-                f"falling back to {MODEL_CHAIN[i + 1]}.",
-                file=sys.stderr,
-            )
-        except Exception as exc:  # noqa: BLE001 - any other API failure should not crash the workflow
-            print(f"Gemini API call failed ({model}): {exc}", file=sys.stderr)
-            return None
-    return None  # unreachable: the loop always returns or exits on the last model
+                break
+            except Exception as exc:  # noqa: BLE001 - any other API failure should not crash the workflow
+                print(f"Gemini API call failed ({model}): {exc}", file=sys.stderr)
+                return None
+
+    print(
+        "Gemini API unavailable or quota exceeded on all models in chain; failing open with no drift verdict.",
+        file=sys.stderr,
+    )
+    return None
 
 
 def main() -> None:
