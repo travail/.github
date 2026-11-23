@@ -37,13 +37,14 @@ DIFF_CHAR_LIMIT = 150000
 
 PROMPT_TEMPLATE = """\
 Below are the diff of a GitHub pull request and the current contents of the
-repository's README.md. README.md is the state of the file after the diff
-has already been applied: a line the diff removes (a `-` line) is text that
-used to exist and no longer does. It is not present in README.md below, no
-matter how closely it may read like something README.md would say. When
-checking whether an identifier from the diff "appears in README.md", only a
-line of README.md itself counts as that identifier appearing -- never a `-`
-line quoted or paraphrased from the diff.
+repository's README.md. The diff contains code changes and excludes README.md
+itself. README.md below reflects the final state of the file in this pull
+request after all commits have been applied.
+
+If the PR changes code and the PR author has already updated README.md to match
+those changes (or removed obsolete descriptions), that is NOT drift. Only
+conclude that README.md needs updating if the code changes render the current
+README.md inaccurate, misleading, or broken for a user to follow.
 
 Work through these steps, writing out your reasoning for each as you go:
 
@@ -60,9 +61,12 @@ Work through these steps, writing out your reasoning for each as you go:
    query parameter versus an unrelated frontend-only browser URL/state
    parameter that happens to share the name -- is not drift.
 4. If any identifier appears in README.md, is the same identifier as in
-   step 3, and the diff changes or removes what it names, so following
-   README.md exactly as written would now fail or mislead a reader, the
-   answer is yes.
+   step 3, and the diff changes or removes what it names, judge whether the
+   current README.md has already been updated to reflect the change or still
+   describes the old, broken behavior. If following README.md exactly as
+   written would now fail or mislead a reader, the answer is yes. If
+   README.md has already been updated to accurately reflect the new reality,
+   the answer is no.
 5. Only if no changed identifier appears literally in README.md as the
    same identifier, judge whether the diff is purely internal (refactoring
    of details README.md does not describe, added tests, bug fixes, and the
@@ -95,6 +99,7 @@ def get_diff(base_ref: str) -> str:
             "--",
             ".",
             ":(exclude,glob)**/go.sum",
+            ":(exclude)README.md",
         ],
         check=True,
         capture_output=True,
