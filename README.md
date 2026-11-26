@@ -20,6 +20,22 @@ This repository provides default fallback templates that GitHub automatically ap
 
 Individual repositories can override these defaults at any time by defining their own templates in their local `.github/` directory.
 
+### Labels
+
+Labels are not inherited from this repository. New repositories get GitHub's default labels, which include `bug` and `enhancement`. Create the following ones by hand.
+
+`maintenance` (create it right after creating a repository):
+
+```sh
+gh label create maintenance -R travail/<repo> --color d4c5f9 --description "Tooling, CI, and other upkeep work not tied to a feature"
+```
+
+`readme-drift-ack` (only for repositories that call `readme-drift-check.yml` with `fail-on-drift: true`):
+
+```sh
+gh label create readme-drift-ack -R travail/<repo> --color ededed --description "Acknowledge a README drift warning as a false positive"
+```
+
 ### Reusable Workflows (`.github/workflows/`)
 
 Workflows shared by the repositories under the `travail` account. Call them with `uses: travail/.github/.github/workflows/<name>.yml@v1`. Pin to the `v1` tag; do not use `@main`, because a broken change would reach every repository at once.
